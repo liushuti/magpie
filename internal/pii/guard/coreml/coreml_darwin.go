@@ -13,6 +13,16 @@ package coreml
 #include <string.h>
 #import <CoreML/CoreML.h>
 
+// MLComputePlan and the model-structure classes are macOS 14.4 SDK API: an
+// older SDK has the framework but not their headers, and a build there would
+// fail even though the code asks for them only at run time. Such a build gets
+// Open and Run, and gmlPlan says why there is no plan.
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 140400
+#define GML_PLAN 1
+#else
+#define GML_PLAN 0
+#endif
+
 static char *gmlErr(NSError *e, const char *what) {
 	if (e == nil) return strdup(what);
 	return strdup(e.localizedDescription.UTF8String ?: what);
@@ -55,6 +65,7 @@ static void *gmlOpen(const char *path, char **errp) {
 
 static void gmlClose(void *m) { CFRelease(m); }
 
+#if GML_PLAN
 // gmlWalk adds each operation's estimated cost in b, and its blocks', to
 // cost by the device CoreML's plan prefers for it: the Neural Engine, the
 // GPU, the CPU; ops counts the operations placed.
@@ -99,6 +110,15 @@ static char *gmlPlan(const char *path, double *cost, long *ops) {
 		return strdup("the compute plan needs macOS 14.4");
 	}
 }
+#else
+// gmlPlan says why a Mac built with an older SDK has no plan: its CoreML
+// headers have no MLComputePlan, so the plan isn't compiled, though the
+// program otherwise runs as before.
+static char *gmlPlan(const char *path, double *cost, long *ops) {
+	(void)path; (void)cost; (void)ops;
+	return strdup("the compute plan needs a build with the macOS 14.4 SDK");
+}
+#endif
 
 static MLMultiArray *gmlArray(const float *src, NSArray<NSNumber *> *shape, NSArray<NSNumber *> *strides, size_t n, NSError **err) {
 	float *b = malloc(n * sizeof(float));
@@ -171,7 +191,8 @@ type Model struct {
 	m  unsafe.Pointer
 	// Device is where CoreML's plan runs most of the program, by its
 	// estimated cost: "Neural Engine", "GPU" or "CPU"; "" where the plan
-	// can't be read (before macOS 14.4), and DeviceErr says why.
+	// can't be read (before macOS 14.4, or built with an older SDK),
+	// and DeviceErr says why.
 	Device    string
 	DeviceErr error
 }
